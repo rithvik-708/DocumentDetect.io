@@ -1,14 +1,15 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ActionItem } from '@/lib/types';
-import { CheckSquare, Square, Clock, Flag, CheckCircle2 } from 'lucide-react';
+import { ActionItem, EvidenceItem } from '@/lib/types';
+import { CheckSquare, Square, Clock, Flag, CheckCircle2, Quote, ShieldAlert, Sparkles } from 'lucide-react';
 
 interface ActionChecklistProps {
   actionItems: ActionItem[];
+  onInspectEvidence?: (evidence: EvidenceItem) => void;
 }
 
-export function ActionChecklist({ actionItems }: ActionChecklistProps) {
+export function ActionChecklist({ actionItems, onInspectEvidence }: ActionChecklistProps) {
   const [completedItems, setCompletedItems] = useState<Record<number, boolean>>({});
   const [priorityFilter, setPriorityFilter] = useState<'all' | 'high' | 'medium' | 'low'>('all');
 
@@ -102,12 +103,12 @@ export function ActionChecklist({ actionItems }: ActionChecklistProps) {
       <div className="space-y-3">
         {filteredItems.map(({ item, originalIndex }) => {
           const isDone = !!completedItems[originalIndex];
+          const hasQuote = Boolean(item.sourceQuote && item.sourceQuote.trim().length > 0);
 
           return (
             <div
               key={originalIndex}
-              onClick={() => toggleItem(originalIndex)}
-              className={`group flex items-start gap-3.5 rounded-xl border p-4 cursor-pointer transition-all ${
+              className={`group flex items-start gap-3.5 rounded-xl border p-4 transition-all ${
                 isDone
                   ? 'border-emerald-500/20 bg-emerald-500/5 opacity-75'
                   : 'border-zinc-800/80 bg-zinc-950/40 hover:border-zinc-700'
@@ -115,6 +116,7 @@ export function ActionChecklist({ actionItems }: ActionChecklistProps) {
             >
               <button
                 type="button"
+                onClick={() => toggleItem(originalIndex)}
                 className={`mt-0.5 shrink-0 rounded transition-colors ${
                   isDone
                     ? 'text-emerald-400'
@@ -131,7 +133,8 @@ export function ActionChecklist({ actionItems }: ActionChecklistProps) {
               <div className="flex-1">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h4
-                    className={`text-sm font-semibold transition-all ${
+                    onClick={() => toggleItem(originalIndex)}
+                    className={`text-sm font-semibold cursor-pointer transition-all ${
                       isDone
                         ? 'line-through text-zinc-500'
                         : 'text-white group-hover:text-purple-200'
@@ -153,12 +156,42 @@ export function ActionChecklist({ actionItems }: ActionChecklistProps) {
                   {item.description}
                 </p>
 
-                {item.deadline && (
-                  <div className="mt-2.5 flex items-center gap-1.5 text-xs font-medium text-amber-300/90">
-                    <Clock className="h-3.5 w-3.5" />
-                    <span>Deadline: {item.deadline}</span>
-                  </div>
-                )}
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-zinc-900/80">
+                  {item.deadline ? (
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-amber-300/90">
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>Deadline: {item.deadline}</span>
+                    </div>
+                  ) : (
+                    <span className="text-[10px] text-zinc-500">No specific cutoff date</span>
+                  )}
+
+                  {/* Proof Mode trigger */}
+                  {hasQuote && onInspectEvidence ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onInspectEvidence({
+                          title: item.title,
+                          claim: item.description,
+                          sourceQuote: item.sourceQuote,
+                          page: item.page,
+                          confidence: item.confidence || 'high',
+                          category: 'action',
+                        })
+                      }
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-purple-400 hover:text-purple-300 transition-colors"
+                    >
+                      <Sparkles className="h-2.5 w-2.5" />
+                      <span>View Evidence</span>
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-zinc-500">
+                      <ShieldAlert className="h-3 w-3" />
+                      <span>Synthesized action</span>
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           );

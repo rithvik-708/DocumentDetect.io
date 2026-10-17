@@ -11,9 +11,13 @@ export interface KeyFact {
 export interface Deadline {
   dateText: string;
   action: string;
-  sourceQuote: string;
+  sourceQuote: string | null;
   page: number | null;
   confidence: 'high' | 'medium' | 'low';
+  isStrictDeadline?: boolean; // true if cutoff/penalty/action required, false if informational date mentioned
+  priority?: 'high' | 'medium' | 'low';
+  parsedDate?: string | null; // ISO YYYY-MM-DD for accurate chronological sorting
+  completed?: boolean;
 }
 
 export interface ActionItem {
@@ -23,6 +27,7 @@ export interface ActionItem {
   deadline: string | null;
   sourceQuote: string | null;
   page: number | null;
+  confidence?: 'high' | 'medium' | 'low';
 }
 
 export interface MissingInfo {
@@ -49,7 +54,30 @@ export interface AnalysisResult {
   missingInformation: MissingInfo[];
   plainLanguageExplanations: PlainLanguageExplanation[];
   limitations: string[];
+  rawExtractedText?: string;
 }
+
+export interface EvidenceItem {
+  title: string;
+  claim: string;
+  sourceQuote: string | null;
+  page: number | null;
+  confidence?: 'high' | 'medium' | 'low';
+  category: 'fact' | 'deadline' | 'action' | 'clause';
+}
+
+export type LanguageCode = 'en-IN' | 'te-IN' | 'hi-IN';
+
+export interface TranslatedData {
+  summary?: string[];
+  keyFacts?: Array<{ label: string; value: string }>;
+  actionItems?: Array<{ title: string; description: string }>;
+  deadlines?: Array<{ action: string }>;
+  plainLanguageExplanations?: Array<{ explanation: string }>;
+  missingInformation?: Array<{ item: string; reason: string }>;
+}
+
+export type BhashaCache = Partial<Record<LanguageCode, TranslatedData>>;
 
 export type AnalysisStage =
   | 'reading'

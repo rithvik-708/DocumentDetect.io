@@ -78,6 +78,7 @@ export async function POST(req: NextRequest) {
 
     // Step 2: Analyze using Sarvam 105B LLM
     const analysis = await analyzeWithLLM(extractedText, apiKey);
+    analysis.rawExtractedText = extractedText;
 
     return NextResponse.json({
       success: true,

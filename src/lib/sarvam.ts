@@ -1,5 +1,6 @@
 import { AnalysisResult } from './types';
 import JSZip from 'jszip';
+import { jsonrepair } from 'jsonrepair';
 
 const SARVAM_BASE_URL = 'https://api.sarvam.ai';
 
@@ -208,10 +209,13 @@ CRITICAL INSTRUCTIONS:
   "deadlines": [
     {
       "dateText": "Explicit date/time mentioned",
-      "action": "Action required by this date",
+      "action": "Action required by this date or event occurring",
       "sourceQuote": "Exact quote",
       "page": 1,
-      "confidence": "high" | "medium" | "low"
+      "confidence": "high" | "medium" | "low",
+      "isStrictDeadline": true,
+      "priority": "high" | "medium" | "low",
+      "parsedDate": "YYYY-MM-DD or null"
     }
   ],
   "actionItems": [
@@ -221,7 +225,8 @@ CRITICAL INSTRUCTIONS:
       "priority": "high" | "medium" | "low",
       "deadline": "Deadline text if any, or null",
       "sourceQuote": "Exact quote or null",
-      "page": 1
+      "page": 1,
+      "confidence": "high" | "medium" | "low"
     }
   ],
   "missingInformation": [
@@ -289,11 +294,136 @@ export async function analyzeWithLLM(documentText: string, apiKey: string): Prom
     cleanJson = cleanJson.substring(firstBrace, lastBrace + 1);
   }
 
+  let parsed: any;
   try {
-    const parsed = JSON.parse(cleanJson) as AnalysisResult;
-    return parsed;
-  } catch (err) {
-    console.error('Failed to parse LLM JSON:', cleanJson);
-    throw new Error('Failed to parse analysis from Sarvam AI response.');
+    parsed = JSON.parse(cleanJson);
+  } catch (initialErr) {
+    try {
+      const repaired = jsonrepair(cleanJson);
+      parsed = JSON.parse(repaired);
+    } catch (repairErr) {
+      // Last-ditch escape cleaner for LaTeX / invalid escapes
+      try {
+        const cleanedEscapes = cleanJson.replace(/\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})/g, '\\\\');
+        const secondRepaired = jsonrepair(cleanedEscapes);
+        parsed = JSON.parse(secondRepaired);
+      } catch (finalErr) {
+        console.error('Failed to parse LLM JSON after repairs:', cleanJson);
+        throw new Error('Failed to parse analysis from Sarvam AI response.');
+      }
+    }
   }
+
+  return sanitizeAnalysisResult(parsed);
+}
+
+/**
+ * Sanitize and validate every field in AnalysisResult to guarantee runtime stability
+ */
+function sanitizeAnalysisResult(data: any): AnalysisResult {
+  return {
+    documentType: data?.documentType || 'Official Document',
+    issuingOrganization: data?.issuingOrganization || null,
+    documentDate: data?.documentDate || null,
+    summary: Array.isArray(data?.summary) ? data.summary.map(String) : [],
+    keyFacts: Array.isArray(data?.keyFacts)
+      ? data.keyFacts.map((f: any) => ({
+          label: String(f?.label || 'Fact'),
+          value: String(f?.value || ''),
+          sourceQuote: f?.sourceQuote ? String(f.sourceQuote) : null,
+          page: typeof f?.page === 'number' ? f.page : null,
+          confidence: (['high', 'medium', 'low'].includes(f?.confidence) ? f.confidence : 'medium') as any,
+        }))
+      : [],
+    deadlines: Array.isArray(data?.deadlines)
+      ? data.deadlines.map((d: any) => ({
+          dateText: String(d?.dateText || d?.action || 'Date not specified'),
+          action: String(d?.action || 'Action required'),
+          sourceQuote: d?.sourceQuote ? String(d.sourceQuote) : null,
+          page: typeof d?.page === 'number' ? d.page : null,
+          confidence: (['high', 'medium', 'low'].includes(d?.confidence) ? d.confidence : 'medium') as any,
+          isStrictDeadline: Boolean(d?.isStrictDeadline),
+          priority: (['high', 'medium', 'low'].includes(d?.priority) ? d.priority : 'medium') as any,
+          parsedDate: d?.parsedDate ? String(d.parsedDate) : null,
+        }))
+      : [],
+    actionItems: Array.isArray(data?.actionItems)
+      ? data.actionItems.map((a: any) => ({
+          title: String(a?.title || 'Action item'),
+          description: String(a?.description || ''),
+          priority: (['high', 'medium', 'low'].includes(a?.priority) ? a.priority : 'medium') as any,
+          deadline: a?.deadline ? String(a.deadline) : null,
+          sourceQuote: a?.sourceQuote ? String(a.sourceQuote) : null,
+          page: typeof a?.page === 'number' ? a.page : null,
+          confidence: (['high', 'medium', 'low'].includes(a?.confidence) ? a.confidence : 'high') as any,
+        }))
+      : [],
+    missingInformation: Array.isArray(data?.missingInformation)
+      ? data.missingInformation.map((m: any) => ({
+          item: String(m?.item || 'Unspecified detail'),
+          reason: String(m?.reason || ''),
+          confidence: (['high', 'medium', 'low'].includes(m?.confidence) ? m.confidence : 'medium') as any,
+        }))
+      : [],
+    plainLanguageExplanations: Array.isArray(data?.plainLanguageExplanations)
+      ? data.plainLanguageExplanations.map((p: any) => ({
+          originalText: String(p?.originalText || ''),
+          explanation: String(p?.explanation || ''),
+          sourceQuote: String(p?.sourceQuote || p?.originalText || ''),
+          page: typeof p?.page === 'number' ? p.page : null,
+        }))
+      : [],
+    limitations: Array.isArray(data?.limitations) ? data.limitations.map(String) : [],
+  };
+}
+
+/**
+ * Translate a single text string using Sarvam Translate API (Mayura / sarvam-translate:v1)
+ */
+export async function translateText(
+  text: string,
+  targetLanguage: string,
+  apiKey: string
+): Promise<string> {
+  if (!text || text.trim().length === 0) return text;
+
+  const res = await fetch(`${SARVAM_BASE_URL}/translate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'api-subscription-key': apiKey,
+    },
+    body: JSON.stringify({
+      input: text,
+      source_language_code: 'en-IN',
+      target_language_code: targetLanguage,
+      model: 'sarvam-translate:v1',
+      mode: 'formal',
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Sarvam Translate failed (${res.status}): ${errText}`);
+  }
+
+  const data = await res.json();
+  return data.translated_text || text;
+}
+
+/**
+ * Translate a batch of text strings concurrently
+ */
+export async function translateBatch(
+  texts: string[],
+  targetLanguage: string,
+  apiKey: string
+): Promise<string[]> {
+  const promises = texts.map((t) =>
+    translateText(t, targetLanguage, apiKey).catch((err) => {
+      console.warn('Individual translation failure, preserving original:', err);
+      return t;
+    })
+  );
+  return Promise.all(promises);
 }
